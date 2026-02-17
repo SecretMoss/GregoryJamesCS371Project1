@@ -75,54 +75,50 @@ void *client_thread_func(void *arg) {
         exit(EXIT_FAILURE);
     }
 	
-    data->total_rtt = 0;
-    data->total_messages = 0;
+    data->t_rtt = 0;
+    data->t_messages = 0;
 
 
 
     for (int i = 0; i < num_requests; i++) {
-        // 1. Start Timer
+        // Start timer
         gettimeofday(&start, NULL);
 
-        // 2. Send Message
+        // Send message
         if (send(data->socket_fd, send_buf, MESSAGE_SIZE, 0) < 0) {
             perror("Send failed");
             exit(EXIT_FAILURE);
         }
 
-        // 3. Wait for response using epoll
+        // Wait for response
         int n = epoll_wait(data->epoll_fd, events, MAX_EVENTS, -1); // -1 means wait indefinitely
         if (n < 0) {
             perror("Epoll wait error");
             exit(EXIT_FAILURE);
         }
 
-        // 4. Read the response
-        // Note: In a real app, you'd loop recv until all bytes arrive, 
-        // but for 16 bytes on localhost, a single recv is usually safe for this assignment.
+        // Read response
         int bytes_recvd = recv(data->socket_fd, recv_buf, MESSAGE_SIZE, 0);
         if (bytes_recvd <= 0) {
             perror("Recv failed or server closed");
             exit(EXIT_FAILURE);
         }
 
-        // 5. End Timer
         gettimeofday(&end, NULL);
 
-        // 6. Calculate RTT for this single message (in microseconds)
-        long long seconds = end.tv_sec - start.tv_sec;
+        // Calculate RTT
+        long long s = end.tv_sec - start.tv_sec;
         long long micros = end.tv_usec - start.tv_usec;
-        long long rtt = (seconds * 1000000) + micros;
+        long long rtt = (s * 1000000) + micros;
 
-        data->total_rtt += rtt;
-        data->total_messages++;
+        data->t_rtt += rtt;
+        data->t_messages++;
     }
 
-    // Calculate Request Rate (Requests / Second)
-    // Total RTT is in microseconds, so convert to seconds first
+    // Calculate Request Rate
     double total_time_sec = (double)data->total_rtt / 1000000.0;
     if (total_time_sec > 0) {
-        data->request_rate = data->total_messages / total_time_sec;
+        data->request_rate = data->t_messages / total_time_sec;
     } else {
         data->request_rate = 0.0f;
     }
@@ -144,6 +140,36 @@ void run_client() {
      * and connect these sockets of client threads to the server
      */
     
+    // Configure server address
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(server_port);
+
+    if (inet_pton(AF_INET, server_ip, &server_addr.sin_addr) <= 0) {
+        perror("Invalid address/ Address not supported");
+        exit(EXIT_FAILURE);
+    }
+m
+    for (int i = 0; i < num_client_threads; i++) {
+        // Create TCP Socket
+        if ((thread_data[i].socket_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+            perror("Socket creation error");
+            exit(EXIT_FAILURE);
+        }
+
+        // Connect to Server
+        if (connect(thread_data[i].socket_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+            perror("Connection Failed");
+            exit(EXIT_FAILURE);
+        }
+
+        // Create Epoll Instance
+        if ((thread_data[i].epoll_fd = epoll_create1(0)) < 0) {
+            perror("Epoll creation error");
+            exit(EXIT_FAILURE);
+        }
+    }
+
     // Hint: use thread_data to save the created socket and epoll instance for each thread
     // You will pass the thread_data to pthread_create() as below
     for (int i = 0; i < num_client_threads; i++) {
@@ -153,6 +179,22 @@ void run_client() {
     /* TODO:
      * Wait for client threads to complete and aggregate metrics of all client threads
      */
+
+    long long t_rtt = 0;
+    long t_messages = 0;
+    float t_request_rate = 0.0;
+
+    for (int i = 0; i < num_client_threads; i++) {
+        pthread_join(threads[i], NULL);
+
+        total_rtt += thread_data[i].total_rtt;
+        total_messages += thread_data[i].total_messages;
+        total_request_rate += thread_data[i].request_rate;
+
+        // Cleanup
+        close(thread_data[i].socket_fd);
+        close(thread_data[i].epoll_fd);
+    }
 
     printf("Average RTT: %lld us\n", total_rtt / total_messages);
     printf("Total Request Rate: %f messages/s\n", total_request_rate);
