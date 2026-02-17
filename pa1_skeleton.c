@@ -19,7 +19,7 @@
 /* 
 Please specify the group members here
 
-# Student #1: 
+# Student #1: Gregory James
 # Student #2:
 # Student #3: 
 
@@ -68,15 +68,64 @@ void *client_thread_func(void *arg) {
     // Hint 1: register the "connected" client_thread's socket in the its epoll instance
     // Hint 2: use gettimeofday() and "struct timeval start, end" to record timestamp, which can be used to calculated RTT.
 
-    /* TODO:
-     * It sends messages to the server, waits for a response using epoll,
-     * and measures the round-trip time (RTT) of this request-response.
-     */
- 
-    /* TODO:
-     * The function exits after sending and receiving a predefined number of messages (num_requests). 
-     * It calculates the request rate based on total messages and RTT
-     */
+    event.events = EPOLLIN;
+    event.data.fd = data->socket_fd;
+    if (epoll_ctl(data->epoll_fd, EPOLL_CTL_ADD, data->socket_fd, &event) < 0) {
+        perror("Epoll ctl client failed");
+        exit(EXIT_FAILURE);
+    }
+	
+    data->total_rtt = 0;
+    data->total_messages = 0;
+
+
+
+    for (int i = 0; i < num_requests; i++) {
+        // 1. Start Timer
+        gettimeofday(&start, NULL);
+
+        // 2. Send Message
+        if (send(data->socket_fd, send_buf, MESSAGE_SIZE, 0) < 0) {
+            perror("Send failed");
+            exit(EXIT_FAILURE);
+        }
+
+        // 3. Wait for response using epoll
+        int n = epoll_wait(data->epoll_fd, events, MAX_EVENTS, -1); // -1 means wait indefinitely
+        if (n < 0) {
+            perror("Epoll wait error");
+            exit(EXIT_FAILURE);
+        }
+
+        // 4. Read the response
+        // Note: In a real app, you'd loop recv until all bytes arrive, 
+        // but for 16 bytes on localhost, a single recv is usually safe for this assignment.
+        int bytes_recvd = recv(data->socket_fd, recv_buf, MESSAGE_SIZE, 0);
+        if (bytes_recvd <= 0) {
+            perror("Recv failed or server closed");
+            exit(EXIT_FAILURE);
+        }
+
+        // 5. End Timer
+        gettimeofday(&end, NULL);
+
+        // 6. Calculate RTT for this single message (in microseconds)
+        long long seconds = end.tv_sec - start.tv_sec;
+        long long micros = end.tv_usec - start.tv_usec;
+        long long rtt = (seconds * 1000000) + micros;
+
+        data->total_rtt += rtt;
+        data->total_messages++;
+    }
+
+    // Calculate Request Rate (Requests / Second)
+    // Total RTT is in microseconds, so convert to seconds first
+    double total_time_sec = (double)data->total_rtt / 1000000.0;
+    if (total_time_sec > 0) {
+        data->request_rate = data->total_messages / total_time_sec;
+    } else {
+        data->request_rate = 0.0f;
+    }
 
     return NULL;
 }
