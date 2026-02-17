@@ -75,8 +75,8 @@ void *client_thread_func(void *arg) {
         exit(EXIT_FAILURE);
     }
 	
-    data->t_rtt = 0;
-    data->t_messages = 0;
+    data->total_rtt = 0;
+    data->total_messages = 0;
 
 
 
@@ -111,14 +111,14 @@ void *client_thread_func(void *arg) {
         long long micros = end.tv_usec - start.tv_usec;
         long long rtt = (s * 1000000) + micros;
 
-        data->t_rtt += rtt;
-        data->t_messages++;
+        data->total_rtt += rtt;
+        data->total_messages++;
     }
 
     // Calculate Request Rate
     double total_time_sec = (double)data->total_rtt / 1000000.0;
     if (total_time_sec > 0) {
-        data->request_rate = data->t_messages / total_time_sec;
+        data->request_rate = data->total_messages / total_time_sec;
     } else {
         data->request_rate = 0.0f;
     }
@@ -149,7 +149,7 @@ void run_client() {
         perror("Invalid address/ Address not supported");
         exit(EXIT_FAILURE);
     }
-m
+
     for (int i = 0; i < num_client_threads; i++) {
         // Create TCP Socket
         if ((thread_data[i].socket_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
@@ -187,17 +187,17 @@ m
     for (int i = 0; i < num_client_threads; i++) {
         pthread_join(threads[i], NULL);
 
-        total_rtt += thread_data[i].total_rtt;
-        total_messages += thread_data[i].total_messages;
-        total_request_rate += thread_data[i].request_rate;
+        t_rtt += thread_data[i].total_rtt;
+        t_messages += thread_data[i].total_messages;
+        t_request_rate += thread_data[i].request_rate;
 
         // Cleanup
         close(thread_data[i].socket_fd);
         close(thread_data[i].epoll_fd);
     }
 
-    printf("Average RTT: %lld us\n", total_rtt / total_messages);
-    printf("Total Request Rate: %f messages/s\n", total_request_rate);
+    printf("Average RTT: %lld us\n", t_rtt / t_messages);
+    printf("Total Request Rate: %f messages/s\n", t_request_rate);
 }
 
 void run_server() {
