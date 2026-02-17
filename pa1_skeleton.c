@@ -201,11 +201,52 @@ m
 }
 
 void run_server() {
+    int listen_fd, epoll_fd;
+    struct sockaddr_in server_addr;
+    struct epoll_event event, events[MAX_EVENTS];
 
     /* TODO:
      * Server creates listening socket and epoll instance.
      * Server registers the listening socket to epoll
      */
+
+    // Create listening socket
+    if ((listen_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        perror("Socket creation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // Bind socket to IP and Port
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = inet_addr(server_ip);
+    server_addr.sin_port = htons(server_port);
+
+    if (bind(listen_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        perror("Bind failed");
+        exit(EXIT_FAILURE);
+    }
+
+    if (listen(listen_fd, 10) < 0) {
+        perror("Listen failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // Create epoll instance
+    if ((epoll_fd = epoll_create1(0)) < 0) {
+        perror("Epoll create failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // Register listening socket
+    event.events = EPOLLIN;
+    event.data.fd = listen_fd;
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, listen_fd, &event) < 0) {
+        perror("Epoll ctl failed");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Server running on %s:%d\n", server_ip, server_port);
 
     /* Server's run-to-completion event loop */
     while (1) {
@@ -213,6 +254,47 @@ void run_server() {
          * Server uses epoll to handle connection establishment with clients
          * or receive the message from clients and echo the message back
          */
+
+	int n_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+        if (n_events < 0) {
+            perror("Epoll wait failed");
+            exit(EXIT_FAILURE);
+        }
+
+        for (int i = 0; i < n_events; i++) {
+            // Case 1
+            if (events[i].data.fd == listen_fd) {
+                int conn_fd;
+                struct sockaddr_in client_addr;
+                socklen_t client_len = sizeof(client_addr);
+
+                if ((conn_fd = accept(listen_fd, (struct sockaddr *)&client_addr, &client_len)) < 0) {
+                    perror("Accept failed");
+                    continue;
+                }
+
+                event.events = EPOLLIN;
+                event.data.fd = conn_fd;
+                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, conn_fd, &event) < 0) {
+                    perror("Epoll add client failed");
+                    close(conn_fd);
+                }
+            } 
+            // Case 2
+            else {
+                int client_fd = events[i].data.fd;
+                char buffer[MESSAGE_SIZE];
+
+                int bytes_read = recv(client_fd, buffer, MESSAGE_SIZE, 0);
+
+                if (bytes_read <= 0) {
+                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
+                    close(client_fd);
+                } else {
+                    send(client_fd, buffer, bytes_read, 0);
+                }
+            }
+        }
     }
 }
 
